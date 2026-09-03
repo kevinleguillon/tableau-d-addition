@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Défi des additions</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: Arial, sans-serif; background: #f4f7fb;
+    color: #1f2937; display: flex; justify-content: center; min-height: 100vh;
+  }
+  .app { width: min(1050px, 96vw); padding: 24px 0 40px; }
+  h1 { text-align: center; margin: 0 0 8px; font-size: 34px; }
+  .subtitle { text-align:center; color:#64748b; margin-bottom:20px; }
+  .panel {
+    background:white; border-radius:18px; padding:20px;
+    box-shadow:0 8px 25px rgba(0,0,0,.08); margin-bottom:18px;
+  }
+  .controls { display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:center; }
+  label { font-weight:bold; }
+  select, input, button {
+    font-size:18px; padding:10px 14px; border-radius:10px; border:2px solid #dbe2ea;
+  }
+  button { cursor:pointer; background:#2563eb; color:white; border:0; font-weight:bold; }
+  button:hover { filter:brightness(.95); }
+  .stats { display:flex; justify-content:center; gap:30px; margin-top:16px; font-size:18px; }
+  .question { text-align:center; }
+  .equation { font-size:54px; font-weight:bold; margin:8px 0 16px; }
+  #answer { width:150px; text-align:center; font-size:28px; }
+  #validate { margin-left:8px; }
+  #feedback { min-height:32px; margin-top:14px; font-size:20px; font-weight:bold; }
+  .table-wrap { overflow:auto; }
+  table { border-collapse:collapse; margin:auto; }
+  th, td {
+    width:64px; height:52px; text-align:center; border:1px solid #cbd5e1;
+    font-size:18px;
+  }
+  th { background:#e2e8f0; font-weight:bold; }
+  td.done { background:#dcfce7; color:#166534; }
+  td.current { background:#fde68a; outline:4px solid #f59e0b; outline-offset:-4px; font-weight:bold; }
+  td.wrong { background:#fee2e2; color:#b91c1c; }
+  td.hidden-cell { background:#fff; color:transparent; }
+  td.hidden-cell.current { color:transparent; }
+  .legend { text-align:center; color:#64748b; margin-top:12px; font-size:14px; }
+  @media (max-width:600px) {
+    h1 {font-size:27px}.equation{font-size:42px} th,td{width:48px;height:45px;font-size:15px}
+    .stats{gap:15px; font-size:16px; flex-wrap:wrap}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>🎯 Défi des additions</h1>
+  <div class="subtitle">Le programme choisit une case. Trouve la somme : chaque réussite complète automatiquement les deux sens du tableau.</div>
+
+  <div class="panel">
+    <div class="controls">
+      <label for="max">Nombres jusqu'à :</label>
+      <select id="max">
+        <option value="5">5</option>
+        <option value="10" selected>10</option>
+        <option value="15">15</option>
+        <option value="20">20</option>
+      </select>
+      <button id="newGame">Nouvelle partie</button>
+    </div>
+    <div class="stats">
+      <span>✅ Réussites : <b id="score">0</b></span>
+      <span>🎲 Questions : <b id="asked">0</b></span>
+      <span>🏆 Série : <b id="streak">0</b></span>
+    </div>
+  </div>
+
+  <div class="panel question">
+    <div id="equation" class="equation">— + — = ?</div>
+    <input id="answer" type="number" inputmode="numeric" autocomplete="off" aria-label="Réponse">
+    <button id="validate">Valider</button>
+    <div id="feedback"></div>
+  </div>
+
+  <div class="panel table-wrap">
+    <table id="table"></table>
+    <div class="legend">⬜ à compléter · 🟨 calcul en cours · 🟩 réussi · 🟥 erreur</div>
+  </div>
+</div>
+
+<script>
+const maxSelect = document.getElementById('max');
+const tableEl = document.getElementById('table');
+const equationEl = document.getElementById('equation');
+const answerEl = document.getElementById('answer');
+const feedbackEl = document.getElementById('feedback');
+const scoreEl = document.getElementById('score');
+const askedEl = document.getElementById('asked');
+const streakEl = document.getElementById('streak');
+
+let max = 10, current = null, score = 0, asked = 0, streak = 0;
+let completed = new Set(), wrong = new Set();
+
+function key(a,b) { return a + '-' + b; }
+
+function buildTable() {
+  tableEl.innerHTML = '';
+  const tr0 = document.createElement('tr');
+  const corner = document.createElement('th'); corner.textContent = '+';
+  tr0.appendChild(corner);
+  for (let b=0;b<=max;b++) {
+    const th=document.createElement('th'); th.textContent=b; tr0.appendChild(th);
+  }
+  tableEl.appendChild(tr0);
+
+  for (let a=0;a<=max;a++) {
+    const tr=document.createElement('tr');
+    const th=document.createElement('th'); th.textContent=a; tr.appendChild(th);
+    for (let b=0;b<=max;b++) {
+      const td=document.createElement('td');
+      const k=key(a,b);
+      td.dataset.key=k;
+      // Le résultat reste vide tant que cette addition n'a pas été réussie.
+      if (completed.has(k)) {
+        td.textContent=a+b;
+        td.classList.add('done');
+      } else {
+        td.textContent='';
+        td.classList.add('hidden-cell');
+      }
+      if (wrong.has(k)) td.classList.add('wrong');
+      if (current && ((current.a===a && current.b===b) || (current.a===b && current.b===a))) {
+        td.classList.add('current');
+      }
+      tr.appendChild(td);
+    }
+    tableEl.appendChild(tr);
+  }
+}
+
+function chooseQuestion() {
+  const all=[];
+  for (let a=0;a<=max;a++) for (let b=0;b<=max;b++) {
+    if (!completed.has(key(a,b))) all.push({a,b});
+  }
+  if (!all.length) {
+    current=null;
+    equationEl.textContent='🎉 Bravo ! Tableau terminé !';
+    feedbackEl.textContent='Toutes les cases ont été réussies.';
+    feedbackEl.style.color='#15803d';
+    answerEl.disabled=true; document.getElementById('validate').disabled=true;
+    buildTable(); return;
+  }
+  current = all[Math.floor(Math.random()*all.length)];
+  equationEl.textContent=`${current.a} + ${current.b} = ?`;
+  answerEl.value=''; answerEl.disabled=false;
+  document.getElementById('validate').disabled=false;
+  feedbackEl.textContent='';
+  buildTable();
+  setTimeout(()=>answerEl.focus(),50);
+}
+
+function validate() {
+  if (!current) return;
+  const value = Number(answerEl.value);
+  if (answerEl.value.trim()==='') return;
+  asked++;
+  askedEl.textContent=asked;
+
+  const k=key(current.a,current.b);
+  if (value === current.a + current.b) {
+    score++; streak++;
+    completed.add(k);
+    completed.add(key(current.b,current.a)); // complète aussi le calcul dans l'autre sens
+    wrong.delete(k);
+    wrong.delete(key(current.b,current.a));
+    scoreEl.textContent=score; streakEl.textContent=streak;
+    feedbackEl.textContent='✅ Bravo ! Bonne réponse !';
+    feedbackEl.style.color='#15803d';
+    buildTable();
+    setTimeout(chooseQuestion, 650);
+  } else {
+    streak=0; streakEl.textContent=streak;
+    wrong.add(k);
+    feedbackEl.textContent=`❌ Pas encore. Essaie encore !`;
+    feedbackEl.style.color='#b91c1c';
+    buildTable();
+    answerEl.select();
+  }
+}
+
+function newGame() {
+  max=Number(maxSelect.value); score=0; asked=0; streak=0;
+  completed=new Set(); wrong=new Set(); current=null;
+  scoreEl.textContent=0; askedEl.textContent=0; streakEl.textContent=0;
+  answerEl.disabled=false; document.getElementById('validate').disabled=false;
+  buildTable(); chooseQuestion();
+}
+
+document.getElementById('validate').addEventListener('click', validate);
+answerEl.addEventListener('keydown', e => { if(e.key==='Enter') validate(); });
+document.getElementById('newGame').addEventListener('click', newGame);
+maxSelect.addEventListener('change', newGame);
+
+newGame();
+</script>
+</body>
+</html>
